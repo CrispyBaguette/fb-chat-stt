@@ -6,6 +6,7 @@ import signal
 import sys
 import threading
 import time
+import tempfile
 import urllib
 
 from fbchat import Client
@@ -41,10 +42,10 @@ class STTClient(Client):
         # If user not present in cache, fetch
         else:
             try:
-                user = self.fetchUserInfo(user_id)
-                self.__userCache[user_id] = user
+                user_info = self.fetchUserInfo(user_id)
+                self.__userCache[user_id] = user_info[user_id]
                 self.__userCacheFetchTimes[user_id] = ts
-                return user
+                return user_info[user_id]
             except:
                 return None
 
@@ -61,22 +62,29 @@ class STTClient(Client):
             if user.last_name is not None:
                 author_name += " " + user.last_name
 
+        return author_name
+
     def __sttConvert(self, attachment):
         """
         Convert a voice message to text
         """
         # Read the message (.mp4) into a segment
-        # A buffer is required because urlopen does not support seek operations
+        # An intermediary temp file is required because
+        # pydub refuses to load directy from a mp4 file-like obj
+        # TODO: figure ou what's wrong with loading mp4 files
         segment = None
         with urllib.request.urlopen(attachment.url) as f:
-            segment = AudioSegment.from_file(io.BytesIO(f.read()))
+            with tempfile.NamedTemporaryFile() as tmp:
+                tmp.write(f.read())
+                segment = AudioSegment.from_file(tmp.name, "mp4")
 
         # Convert it to a 16 kbit/s, mono, 16 bit .wav
         segment = segment.set_sample_width(2)
-        segment = segment.set_frame_rate(1600)
+        segment = segment.set_frame_rate(16000)
         segment = segment.set_channels(1)
 
-        wav_file = segment.export(format="wav")
+        export = segment.export(format="wav")
+        export.seek(0)
 
         # Upload to the GCP bucket
         # Not strictly necessary, but I have a data hoarding problem
@@ -85,7 +93,7 @@ class STTClient(Client):
         # TODO: nicer file names
         blobName = str(uuid.uuid4())+".wav"
         blob = bucket.blob(blobName)
-        blob.upload_from_file(wav_file)
+        blob.upload_from_file(export)
 
         # Perform the STT
         client = speech_v1.SpeechClient()
@@ -94,7 +102,7 @@ class STTClient(Client):
         response = client.recognize(config, audio)
 
         # Return the most probable result
-        return response.results[0].alternatives[0]
+        return response.results[0].alternatives[0].transcript
 
     def __formatMessage(self, author_id, timestamp, text):
         """
@@ -111,22 +119,29 @@ class STTClient(Client):
             if (thread_id in self._threads
                     and isinstance(attachment, AudioAttachment)
                     and attachment.audio_type == "VOICE_MESSAGE"):
-                # Perform STT on the attachment
-                trans_text = self.__sttConvert(attachment)
 
-                # Format the message
-                formatted_message = self.__formatMessage(
-                    author_id,
-                    message_object.timestamp,
-                    trans_text
-                )
+                try:
+                    # Perform STT on the attachment
+                    trans_text = self.__sttConvert(attachment)
 
-                # Send it back whence it came
-                self.send(
-                    Message(text=formatted_message),
-                    thread_id=thread_id,
-                    thread_type=thread_type
-                )
+                    # Format the message
+                    formatted_message = self.__formatMessage(
+                        author_id,
+                        message_object.timestamp,
+                        trans_text
+                    )
+
+                    print(f"Transcribed message: \"{formatted_message}\""")
+
+                    # Send it back whence it came
+                    self.send(
+                        Message(text=formatted_message),
+                        thread_id=thread_id,
+                        thread_type=thread_type
+                    )
+                except:
+                    print(
+                        f"Error while transcribing message: {sys.exc_info()[0]}")
 
 
 def signal_handler(sig, frame):
