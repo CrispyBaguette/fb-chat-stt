@@ -1,24 +1,18 @@
 import datetime
 import io
 import os
+import uuid
 import signal
 import sys
-import tempfile
 import threading
 import time
 import urllib
-import uuid
 
 from fbchat import Client
-from fbchat.models import *
+from fbchat.models import Message, Thread, AudioAttachment
 from google.cloud import speech_v1, storage
 from google.cloud.speech_v1 import enums
 from pydub import AudioSegment
-
-bucket_name = "audio_messages"
-group_chat_id = "1689913587737241"
-
-threads = []
 
 
 class STTClient(Client):
@@ -26,6 +20,13 @@ class STTClient(Client):
     __userCacheTTL = 7200
     __userCache = dict()
     __userCacheFetchTimes = dict()
+
+    _threads = []
+
+    def __init__(self, user, password, threads, bucket):
+        super().__init__(user, password)
+        self._threads = threads
+        self._bucket = bucket
 
     def __getUser(self, user_id):
         """
@@ -79,7 +80,8 @@ class STTClient(Client):
         # Upload to the GCP bucket
         # Not strictly necessary, but I have a data hoarding problem
         storage_client = storage.Client()
-        bucket = storage_client.bucket(bucket_name)
+        bucket = storage_client.bucket(self._bucket)
+        # TODO: nicer file names
         blobName = str(uuid.uuid4())+".wav"
         blob = bucket.blob(blobName)
         blob.upload_from_file(wav_file)
@@ -87,7 +89,7 @@ class STTClient(Client):
         # Perform the STT
         client = speech_v1.SpeechClient()
         config = {"language_code": "fr-FR"}
-        audio = {"uri": f"gs://{bucket_name}/{blobName}"}
+        audio = {"uri": f"gs://{self._bucket}/{blobName}"}
         response = client.recognize(config, audio)
 
         # Return the most probable result
@@ -126,28 +128,6 @@ class STTClient(Client):
                 )
 
 
-def sampleRecognize(file_name):
-    """
-    Transcribe a short audio file using synchronous speech recognition
-    """
-
-    client = speech_v1.SpeechClient()
-    config = {
-        "language_code": "fr-FR"
-    }
-    audio = {"uri": f"gs://{bucket_name}/{file_name}"}
-
-    response = client.recognize(config, audio)
-    text = []
-
-    for result in response.results:
-        # First alternative is the most probable result
-        alternative = result.alternatives[0]
-        text.append(alternative.transcript)
-
-    return text
-
-
 def signal_handler(sig, frame):
     client.stopListening()
     listening_thread.join()
@@ -155,14 +135,20 @@ def signal_handler(sig, frame):
 
 
 if __name__ == "__main__":
-    # Add the threads we want to listen to
+    # Load the configuration
     threads = os.environ['STT_THREADS'].split(",")
+    bucket = os.environ['STT_BUCKET']
+    user = os.environ['FB_USER']
+    password = os.environ['FB_PASSWORD']
 
-    client = STTClient(os.environ['FB_USER'], os.environ['FB_PASSWORD'])
+    # Set up the FB chat client
+    client = STTClient(user, password, threads, bucket)
 
+    # Run in a thread to avoid blocking everything
     listening_thread = threading.Thread(target=client.listen, args=(False,))
     listening_thread.start()
 
+    # Stop on SIGINT
     signal.signal(signal.SIGINT, signal_handler)
-    print('Press Ctrl+C')
+    print('Press Ctrl+C\n')
     signal.pause()
