@@ -1,11 +1,11 @@
 FROM python:3.8-alpine
 
-RUN apk add ffmpeg
+RUN apk add linux-headers ffmpeg build-base
 
 WORKDIR /usr/src/app
 
-COPY main.py .
+RUN pip install fbchat pydub google-cloud-storage google-cloud-speech
 
-RUN pip install fbchat pydub google-cloud-storage google-cloud speech
+COPY main.py .
 
 CMD [ "python", "./main.py" ]
