@@ -79,7 +79,7 @@ class STTClient(Client):
                 tmp.write(f.read())
                 segment = AudioSegment.from_file(tmp.name, "mp4")
 
-        # Convert it to a 16 kbit/s, mono, 16 bit .wav
+        # Convert it to 16 kHz, 16 bit, mono wav
         segment = segment.set_sample_width(2)
         segment = segment.set_frame_rate(16000)
         segment = segment.set_channels(1)
