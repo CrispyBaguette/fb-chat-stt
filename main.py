@@ -131,7 +131,7 @@ class STTClient(Client):
                         trans_text
                     )
 
-                    print(f"Transcribed message: \"{formatted_message}\""")
+                    print(f"Transcribed message: \"{formatted_message}\"")
 
                     # Send it back whence it came
                     self.send(
