@@ -37,7 +37,8 @@ class STTClient(Client):
 
         ts = time.time()
         # Check for non-stale user in cache
-        if user_id in self.__userCache and self.__userCacheFetchTimes[user_id] + self.__userCacheTTL > ts:
+        if user_id in self.__userCache and self.__userCacheFetchTimes[user_id] + \
+                self.__userCacheTTL > ts:
             return self.__userCache[user_id]
         # If user not present in cache, fetch
         else:
@@ -46,7 +47,7 @@ class STTClient(Client):
                 self.__userCache[user_id] = user_info[user_id]
                 self.__userCacheFetchTimes[user_id] = ts
                 return user_info[user_id]
-            except:
+            except BaseException:
                 return None
 
     def __buildAuthorName(self, user_id):
@@ -91,7 +92,7 @@ class STTClient(Client):
         storage_client = storage.Client()
         bucket = storage_client.bucket(self._bucket)
         # TODO: nicer file names
-        blobName = str(uuid.uuid4())+".wav"
+        blobName = str(uuid.uuid4()) + ".wav"
         blob = bucket.blob(blobName)
         blob.upload_from_file(export)
 
@@ -114,7 +115,14 @@ class STTClient(Client):
 
         return f"{self.__buildAuthorName(author_id)} ({date}): {text}"
 
-    def onMessage(self, author_id, message_object, thread_id, thread_type, ts, **kwargs):
+    def onMessage(
+            self,
+            author_id,
+            message_object,
+            thread_id,
+            thread_type,
+            ts,
+            **kwargs):
         for attachment in message_object.attachments:
             if (thread_id in self._threads
                     and isinstance(attachment, AudioAttachment)
@@ -139,7 +147,7 @@ class STTClient(Client):
                         thread_id=thread_id,
                         thread_type=thread_type
                     )
-                except:
+                except BaseException:
                     print(
                         f"Error while transcribing message: {sys.exc_info()[0]}")
 
@@ -166,5 +174,5 @@ if __name__ == "__main__":
 
     # Stop on SIGINT
     signal.signal(signal.SIGINT, signal_handler)
-    print('Press Ctrl+C\n')
+    print('Press Ctrl+C')
     signal.pause()
