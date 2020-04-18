@@ -22,6 +22,7 @@ class STTClient(Client):
     __userCacheFetchTimes = dict()
 
     _threads = []
+    _bucket_name = None
 
     def __init__(self, user, password, threads, bucket):
         super().__init__(user, password)
@@ -107,7 +108,7 @@ class STTClient(Client):
 
     def onMessage(self, author_id, message_object, thread_id, thread_type, ts, **kwargs):
         for attachment in message_object.attachments:
-            if (thread_id in threads
+            if (thread_id in self._threads
                     and isinstance(attachment, AudioAttachment)
                     and attachment.audio_type == "VOICE_MESSAGE"):
                 # Perform STT on the attachment
