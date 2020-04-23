@@ -8,12 +8,19 @@ import threading
 import time
 import tempfile
 import urllib
+import logging
 
 from fbchat import Client
 from fbchat.models import Message, Thread, AudioAttachment
 from google.cloud import speech_v1, storage
 from google.cloud.speech_v1 import enums
 from pydub import AudioSegment
+
+# Set up logging to stdout
+log = logging.getLogger("stt")
+log.setLevel(logging.DEBUG)
+handler = logging.StreamHandler()
+log.addHandler(handler)
 
 
 class STTClient(Client):
@@ -102,7 +109,10 @@ class STTClient(Client):
         audio = {"uri": f"gs://{self._bucket}/{blobName}"}
         response = client.recognize(config, audio)
 
-        # Return the most probable result
+        if len(response.results) != 1:
+            raise Exception(
+                f"Incorrect number of results ({len(response.results)})")
+
         return response.results[0].alternatives[0].transcript
 
     def __formatMessage(self, author_id, timestamp, text):
@@ -123,11 +133,12 @@ class STTClient(Client):
             thread_type,
             ts,
             **kwargs):
+        log.info(f"Received message {message_object.uid} from {thread_id}")
         for attachment in message_object.attachments:
             if (thread_id in self._threads
                     and isinstance(attachment, AudioAttachment)
                     and attachment.audio_type == "VOICE_MESSAGE"):
-
+                log.info(f"Message {message_object.uid}: found voice message")
                 try:
                     # Perform STT on the attachment
                     trans_text = self.__sttConvert(attachment)
@@ -139,7 +150,8 @@ class STTClient(Client):
                         trans_text
                     )
 
-                    print(f"Transcribed message: \"{formatted_message}\"")
+                    log.info(
+                        f"Transcribed {message_object.uid}: \"{formatted_message}\"")
 
                     # Send it back whence it came
                     self.send(
@@ -147,18 +159,12 @@ class STTClient(Client):
                         thread_id=thread_id,
                         thread_type=thread_type
                     )
-                except BaseException:
-                    print(
-                        f"Error while transcribing message: {sys.exc_info()[0]}")
+                except BaseException as e:
+                    log.error(
+                        f"Error while transcribing message {message_object.uid}: {e}")
 
 
-def signal_handler(sig, frame):
-    client.stopListening()
-    listening_thread.join()
-    sys.exit(0)
-
-
-if __name__ == "__main__":
+def main():
     # Load the configuration
     threads = os.environ['STT_THREADS'].split(",")
     bucket = os.environ['STT_BUCKET']
@@ -173,6 +179,13 @@ if __name__ == "__main__":
     listening_thread.start()
 
     # Stop on SIGINT
+    def signal_handler(*args):
+        client.stopListening()
+        listening_thread.join()
+        sys.exit(0)
     signal.signal(signal.SIGINT, signal_handler)
-    print('Press Ctrl+C')
     signal.pause()
+
+
+if __name__ == "__main__":
+    main()
